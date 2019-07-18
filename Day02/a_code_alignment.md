@@ -52,12 +52,17 @@ Most important things to consider:
  
  	```
     $ export PATH=~/mat/software/samtools-1.2:$PATH
+    
+    cd alignment_STAR/
 	
 	# check out the header
     $ samtools view -H  WT_1_Aligned.sortedByCoord.out.bam
     
 	# look at just the alignment section of the BAM file
     $ samtools view WT_1_Aligned.sortedByCoord.out.bam | head
+    
+	# generate an index that will help other tools to access the BAM file more efficiently
+    $ samtools index WT_1_Aligned.sortedByCoord.out.bam
    ```
 
 ### filter SAM files based on flags, optional fields
@@ -84,7 +89,7 @@ Let's do visual inspection with IGV!
 
 ## IGV
 
-go to [https://www.broadinstitute.org/igv/IGV](https://www.broadinstitute.org/igv/IGV) --> Downloads --> email address --> go to archive --> download `2.2.13.zip` --> double click --> go to Downloads Folder in Terminal --> `sh igv.sh`  
+go to [https://www.broadinstitute.org/igv/IGV](https://www.broadinstitute.org/igv/IGV) --> Downloads --> email address --> go to archive --> download `2.2.<version>.zip` --> double click --> go to Downloads Folder in Terminal --> `sh igv.sh`  
 
 "File" --> load from URL --> `chagall.med.cornell.edu/RNASEQcourse` --> BAM
 
