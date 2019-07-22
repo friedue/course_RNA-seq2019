@@ -69,7 +69,7 @@ Example output via `head WT_1/flagstat.out`:
 General bam file statistics (not RNA-seq specific) similar to `samtools flagstat`
 
 ```
-PATH=~/mat/software/anaconda2/:$PATH
+PATH=~/mat/software/anaconda2/bin/:$PATH
 
 for SAMPLE in WT_1 SNF2_1
 do
