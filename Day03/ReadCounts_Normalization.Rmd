@@ -1,10 +1,12 @@
 ---
 title: "Read counts to DGE, Part I"
 output:
-  html_document: default
-  pdf_document: default
-  toc: true
-editor_options: 
+  pdf_document:
+    toc: yes
+  html_document:
+    code_folding: hide
+    toc: yes
+editor_options:
   chunk_output_type: console
 ---
 
@@ -227,7 +229,7 @@ It is usually helpful to *transform* the normalized read counts to bring them on
 of log2(read counts) - one for unnormalized counts, the other one for normalized
 counts (exclude genes with zero reads in all samples).
 
-```{r boxplots_logReadCounts, fig.width = 10, fig.height = 5}
+```{r boxplots_logReadCounts, fig.width = 10, fig.height = 5, warning=FALSE}
 par(mfrow=c(1,2)) # to plot the two box plots next to each other
 boxplot(log2(counts(DESeq.ds)), notch=TRUE,
         main = "Non-normalized read counts\n(log-transformed)",
