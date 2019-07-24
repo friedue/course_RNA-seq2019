@@ -1,0 +1,263 @@
+---
+title: "Read counts to DGE, Part I"
+output:
+  html_document: default
+  pdf_document: default
+  toc: true
+editor_options: 
+  chunk_output_type: console
+---
+
+This script will show you how to:
+ 
+* Read in `featureCounts` results into R.
+* Use `DESeq2` to:
+  - normalize read counts for differences in sequencing depth
+  - transform reads to the log2 scale including variance reduction
+* Accompany each step by exploratory plots.
+
+You can generate an html document out of this entire script by clicking the `Knit HTML` button in RStudio.
+
+```{r settingUp, warning=FALSE, echo=TRUE, message=FALSE}
+options(stringsAsFactors = FALSE) # this will change a global setting, but just for this session
+
+library(knitr)
+opts_chunk$set(echo = TRUE, message = FALSE,cache=FALSE) # tuning knitr output
+```
+
+## featureCounts
+
+We aligned five samples for the WT and SNF2 condition, respectively.
+You can find those files here: `~/mat/precomputed/results_alignment`.
+
+>How can you check which command was used to generate those `BAM` files?
+
+```{r featureCounts, eval=FALSE, echo = TRUE, engine='bash'}
+## on the command line (!)
+mkdir class/read_counts
+cd class/read_counts
+REF_DIR=~/mat/referenceGenomes/S_cerevisiae/
+
+ # reads for yeast samples counted on the meta-feature level
+~/mat/software/subread-1.6.0-Linux-x86_64/bin/featureCounts \
+	-a ${REF_DIR}/Saccharomyces_cerevisiae.R64-1-1.81.gtf \
+	-o featCounts_genes.txt \
+	 ~/mat/precomputed/results_alignment/*bam 
+```
+
+Let's read the result file into R, i.e. download the table from [our website](http://chagall.med.cornell.edu/RNASEQcourse/featureCounts_result.txt) or
+use the `scp` command to download the table that you generated on the server to
+your local machine.
+
+Loading additional libraries:
+
+```{r}
+library(ggplot2) # for making plots
+library(magrittr) # for "pipe"-like coding in R
+```
+
+We will use the `DESeq2` package to normalize the samples for differences in their sequencing depths.
+
+```{r install_bioconductor_pckgs, eval=FALSE, message = FALSE}
+# not available via install.packages(), but through bioconductor
+BiocManager::install("DESeq2")
+```
+
+```{r warning=FALSE, message=FALSE}
+library(DESeq2)
+```
+
+We will have to generate a `DESeqDataSet`; what is needed for this can be found 
+out via `?DESeqDataSetFromMatrix`.
+The help indicates that we need two tables: `countData` and `colData`.
+
+* `colData`:  `data.frame` with all the variables you know about your samples, e.g., experimental condition, the type, and date of sequencing and so on. Its `row.names` should correspond to the unique sample names.
+* `countData`: should contain a matrix of the actual values associated with the genes and samples. Is equivalent to `assay()`. Conveniently, this is almost exactly the format of the `featureCounts` output.
+
+```{r reading_in}
+# reading in featureCounts output
+readcounts <- read.table("~/Downloads/featCounts_genes.txt",
+                          header=TRUE)
+head(readcounts)
+```
+
+__Preparing the count matrix for DESeq2DataSet class:__
+
+```{r countMatrix_prep}
+# give meaningful and legible sample names
+orig_names <- names(readcounts)
+names(readcounts) <- gsub(".*alignment\\.", "" ,names(readcounts)) %>% gsub("_Aligned.*", "", .)
+
+# gene IDs should be stored as row.names
+row.names(readcounts) <- gsub("-", ".", readcounts$Geneid)
+
+# exclude the columns without read counts (columns 1 to 6 contain additional
+# info such as genomic coordinates) 
+readcounts <- readcounts[,-c(1:6)]
+```
+
+Always check your data set after you manipulated it!
+
+```{r}
+str(readcounts)
+```
+
+```{r}
+head(readcounts)
+```
+
+In addition to the read counts, we need some more information about the samples.
+According to `?colData`, this should be a `data.frame`, where the _rows_ directly
+match the _columns_ of the count data.
+
+Here's how this could be generated in `R` matching the `readcounts` `data.frame` we already have:
+
+```{r making_colData}
+sample_info <- DataFrame(condition = gsub("_[0-9]+", "", names(readcounts)),
+                          row.names = names(readcounts) )
+sample_info
+```
+
+```{r}
+str(sample_info)
+```
+
+Let's generate the `DESeqDataSet`:
+
+```{r DESeqDataSet, warning=FALSE}
+DESeq.ds <- DESeqDataSetFromMatrix(countData = readcounts,
+                              colData = sample_info,
+                              design = ~ condition)
+DESeq.ds
+head(counts(DESeq.ds))
+```
+
+How many reads were counted for each sample ( = library sizes)?
+
+```{r eval=TRUE, echo=TRUE}
+colSums(counts(DESeq.ds))
+```
+```{r eval=TRUE, echo=TRUE}
+colSums(counts(DESeq.ds)) %>% barplot
+```
+
+Remove genes with no reads.
+
+```{r eval = TRUE}
+keep_genes <- rowSums(counts(DESeq.ds)) > 0
+dim(DESeq.ds)
+```
+```{r}
+DESeq.ds <- DESeq.ds[ keep_genes, ]
+dim(DESeq.ds)
+```
+
+```{r}
+counts(DESeq.ds) %>% str
+assay(DESeq.ds) %>% str
+```
+
+Now that we have the data, we can start using `DESeq2`'s functions, e.g. `estimateSizeFactors()` for calculating a factor that will be used to correct for sequencing depth differences.
+
+```{r sizeFactors}
+DESeq.ds <- estimateSizeFactors(DESeq.ds)
+sizeFactors(DESeq.ds)
+```
+
+To see the details of how `DESeq2` calculates those size factors, you could look at the source code via `getMethod("estimateSizeFactors", "DESeqDataSet")`.
+A more verbose description can be found in the original paper by [Anders and Huber](https://genomebiology.biomedcentral.com/articles/10.1186/gb-2010-11-10-r106):
+
+>The purpose of the size factors is to render counts from different samples, which may have been sequenced to different depths, comparable. (...) The total number of reads (...) may seem to be a good measure of sequencing depth (...). Experience with real data, however, shows this not always to be the case, because a few highly and differentially expressed genes may have strong influence on the total read count, causing the ratio of total read counts not to be a good estimate for the ratio of expected counts.
+>Hence, to estimate the size factors, we take the median of the ratios of observed counts (...) [where] each size factor is computed as the median of the ratios of the j-th sample's counts to those of the pseudo-reference, which is obtained by taking the geometric mean across *samples* [= columns].
+
+In summary, the procedure is as follows:
+
+1. for every gene (= row), determine the geometric mean of its read counts across all samples (yielding the "pseudo-reference", i.e. one value per gene);
+2. divide every value of the count matrix by the corresponding pseudo-reference value;
+3. for every sample (= column), determine the median of these ratios. This is the size factor.
+
+```{r}
+## define a function to calculate the geometric mean
+gm_mean <- function(x, na.rm=TRUE){
+  exp(sum(log(x[x > 0]), na.rm=na.rm) / length(x))
+}
+
+## calculate the geometric means for each gene using that function
+## note the use of apply(), which we instruct to apply the gm_mean()
+## function per row (this is what the second parameter, 1, indicates)
+pseudo_refs <-  counts(DESeq.ds) %>% apply(., 1, gm_mean)
+
+## divide each value by its corresponding pseudo-reference value
+pseudo_ref_ratios <- counts(DESeq.ds) %>% apply(., 2, function(cts){ cts/pseudo_refs}) 
+
+## if you want to see what that means at the single-gene level,
+## compare the result of this:
+counts(DESeq.ds)[1,]/pseudo_refs[1]
+## with
+pseudo_ref_ratios[1,]
+
+## determine the median value per sample to get the size factor
+apply(pseudo_ref_ratios, 2, median)
+```
+
+The result should be equivalent to `r sizeFactors(DESeq.ds)`.
+
+```{r sizeFactor_vs_librarySizes, eval=TRUE, echo=TRUE}
+plot(sizeFactors(DESeq.ds), colSums(counts(DESeq.ds)))
+```
+
+The read counts normalized for sequencing depth can be accessed via `counts(..., normalized = TRUE)`.
+
+Let's check whether the normalization helped to adjust global differences between the samples.
+
+```{r boxplots_untransformed, fig.width = 10, fig.height = 5}
+# setting up the plotting layout
+par(mfrow=c(1,2))
+counts.sf_normalized <- counts(DESeq.ds, normalized=TRUE)
+
+# adding the boxplots
+boxplot(counts.sf_normalized, main = "SF normalized")
+boxplot(counts(DESeq.ds), main = "read counts only")
+```
+
+We can't really see anything. 
+It is usually helpful to *transform* the normalized read counts to bring them onto more similar scales.
+
+>To see the influence of the sequencing depth normalization, make two box plots
+of log2(read counts) - one for unnormalized counts, the other one for normalized
+counts (exclude genes with zero reads in all samples).
+
+```{r boxplots_logReadCounts, fig.width = 10, fig.height = 5}
+par(mfrow=c(1,2)) # to plot the two box plots next to each other
+boxplot(log2(counts(DESeq.ds)), notch=TRUE,
+        main = "Non-normalized read counts\n(log-transformed)",
+        ylab="read counts")
+boxplot(log2(counts(DESeq.ds, normalize= TRUE)), notch=TRUE,
+        main = "Size-factor-normalized read counts\n(log-transformed)",
+        ylab="read counts") 
+```
+
+
+### Understanding more properties of read count data
+
+Characteristics we've touched upon so far:
+
+* zeros can mean two things: no expression or no detection
+* fairly large dynamic range
+
+>Make a scatterplot of log normalized counts against each other to see how well 
+the actual values correlate which each other per sample and gene.
+
+```{r logReadCountTables}
+# non-normalized read counts plus pseudocount
+log.counts <- log2(counts(DESeq.ds, normalized = FALSE) + 1)
+# instead of creating a new object, we could assign the values to a distinct matrix
+# normalized and log2-transformed read counts
+assay(DESeq.ds, "log.norm.counts") <- log2(counts(DESeq.ds, normalized=TRUE) + 1)
+```
+
+```{r scatterplots_logNormReadCounts, fig.width = 10, fig.height = 15}
+par(mfrow=c(2,1)) 
+DESeq.ds[, c("WT_1","WT_2")] %>% assay(.,  "log.norm.counts") %>% plot(., cex=.1, main = "WT_1 vs. WT_2")
+DESeq.ds[, c("SNF2_1","SNF2_2")] %>% assay(.,  "log.norm.counts") %>% plot(., cex=.1, main = "SNF2_1 vs SNF2_2")
+```
