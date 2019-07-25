@@ -2,25 +2,21 @@
 title: "GO term enrichment analyses of DEG"
 author: "Friederike Duendar"
 date: "7/24/2019"
-output: html_document
-editor_options: 
-  chunk_output_type: console
----
-
 output:
   pdf_document: default
   html_document: default
-  toc: true
-editor_options: 
+editor_options:
   chunk_output_type: console
 ---
 
+
 ```{r settingUp, warning=FALSE, echo=FALSE, message=FALSE}
 library(knitr)
-opts_chunk$set(echo = TRUE, message = FALSE,cache=TRUE)
+opts_chunk$set(echo = TRUE, message = FALSE,cache=TRUE, warning =FALSE)
 library(DESeq2)
 library(magrittr)
 library(goseq)
+library(ggplot2)
 ```
 
 We need the results of the DESeq2 analysis (`DGE.results`) and the vector of 
@@ -28,6 +24,10 @@ differentially expressed genes (`DGE.genes`).
 
 ```{r}
 load("~/Documents/Teaching/2019_RNA-seq/Rclass.RData")
+DESeq.ds <- DESeq(DESeq.ds)
+DGE.results <- results(DESeq.ds,independentFiltering = TRUE, alpha = 0.05)
+DGEgenes <- rownames(subset(DGE.results, padj < 0.05))
+
 ```
 
 ## GO term enrichment using `goseq`
@@ -72,13 +72,80 @@ go_gns <- getgo( rownames(DGE.results), 'sacCer3', 'ensGene') %>% stack
 To summarize the results, you can use, for example, [REVIGO](http://revigo.irb.hr/).
 
 ```{r}
-# can be summarized in http://revigo.irb.hr/
-subset(GO.wall, over_represented_pvalue < 0.01, select = c("category","over_represented_pvalue")) %>%
+# export a list of over-represented GO terms plus the corresponding p-value
+# which is the input type that REVIGO needs
+subset(GO.wall, over_represented_pvalue < 0.01, 
+       select = c("category","over_represented_pvalue")) %>%
   write.table(., file = "~/Documents/Teaching/2019_RNA-seq/Enriched_GOterms_goseq.txt",
               quote = FALSE, row.names = FALSE, col.names = FALSE)
 ```
 
+REVIGO generates multiple plots; the easiest way to obtain them in high quality is to download the R scripts that it offers and to run those yourself.
+
+```{r eval=FALSE}
+## this will generate a PDF file named "REVIGO_treemap.pdf" in your current
+## working directory
+source("~/Downloads/REVIGO_treemap.r")  
+```
+
+Since I personally don't like plots being immediately printed to PDF (much more difficult to include them in an Rmarkdown!), I've tweaked the function a bit; it's essentially the original REVIGO script that I downloaded minus the part where the revigo.data object is generated and with a couple more options to tune the resulting heatmap.
+
+```{r}
+REVIGO_treemap <- function(revigo.data, col_palette = "Paired",
+                           title = "REVIGO Gene Ontology treemap", ...){
+
+  stuff <- data.frame(revigo.data)
+  names(stuff) <- c("term_ID","description","freqInDbPercent","abslog10pvalue",
+                    "uniqueness","dispensability","representative")
+
+  stuff$abslog10pvalue <- as.numeric( as.character(stuff$abslog10pvalue) )
+  stuff$freqInDbPercent <- as.numeric( as.character(stuff$freqInDbPercent) )
+  stuff$uniqueness <- as.numeric( as.character(stuff$uniqueness) )
+  stuff$dispensability <- as.numeric( as.character(stuff$dispensability) )
+
+  # check the treemap command documentation for all possible parameters - there are a lot more
+  treemap::treemap(
+    stuff,
+    index = c("representative","description"),
+    vSize = "abslog10pvalue",
+    type = "categorical",
+    vColor = "representative",
+    title = title,
+    inflate.labels = FALSE,      
+    lowerbound.cex.labels = 0,   
+    bg.labels = 255,
+    position.legend = "none",
+    fontsize.title = 22, fontsize.labels=c(18,12,8),
+    palette= col_palette, ...
+  )
+
+}
+
+```
+
+I still need the originally downloaded script to generate the `revigo.data` object, which I will then pass onto my newly tweaked function.
+Using the command line tools `sed` and `egrep`,  I'm going to only keep the lines between the one starting with "revigo.data" and the line starting with "stuff".
+The output of that will be parsed into a new file, which will only generate the `revigo.data` object that I'm after (no PDF!).
+
+```{r}
+system("sed -n '/^revigo\\.data.*/,/^stuff.*/p' ~/Downloads/REVIGO_treemap.r | egrep '^rev|^c' > ~/Downloads/REVIGO_myData.r")
+
+## upon sourcing; no treemap PDF will be generated, but the revigo.data object should appear in
+## your environment
+source("~/Downloads/REVIGO_myData.r")
+REVIGO_treemap(revigo.data)
+```
+
 ## Gene set enrichment of KEGG pathways using `ClusterProfiler`
+
+ClusterProfiler actually offers access to a fairly sprawling set of R packages that all deal with over-representation analyses and gene set enrichment analyses.
+Since we just showed you how to do over-representation analyses using `goseq` and REVIGO, we're going to focus on highlighting a function that allows you to perform GSEA using the pathways annotated and curated by [KEGG](https://www.genome.jp/kegg/pathway.html).
+
+To this end, you will need to provide a full list of all genes that you analyzed. Those genes should be sorted by some sort of metric that you feel is a meaningful representation of the signal you're after, e.g. log2FC or a combination of log2FC and p-value or the like. This sorted vector of gene-value pairs is then compared to the KEGG pathways and those pathways that seem to have a consistent enrichment for positive (or negative) fold changes across all of the pathway's genes will be highlighted.
+
+The function that clusterProfiler relies on for GSEA is the `fgsea` function of the [package of the same name](https://www.bioconductor.org/packages/release/bioc/html/fgsea.html), which, in turn, is a more efficient implementation of the original GSEA algorithm introduced by [Subramanian et al. (2005)](https://www.pnas.org/content/102/43/15545).
+
+The main advantage of using clusterProfiler comes from its implementation of [numerous helpful plots](https://yulab-smu.github.io/clusterProfiler-book/chapter12.html). In addition, it takes care of downloading the appropriate annotation from KEGG (or any other data base for which it offers functionalities).
 
 ```{r}
 library(clusterProfiler)
@@ -97,6 +164,8 @@ gsea_kegg <- clusterProfiler::gseKEGG(geneList = genes_for_cp, organism = 'sce',
 
 **Dot plots**:
 
+Dot plots depict the enrichment scores and gene counts per gene set (for the most significant gene sets).
+
 ```{r dotplot_kegg}
 dotplot(gsea_kegg)
 ```
@@ -109,16 +178,10 @@ dotplot(gsea_kegg)
 
 ```{r cnetplot_kegg, message = FALSE, warning = FALSE, fig.width = 16, fig.height = 14}
  cnetplot(gsea_kegg, showCategory = 2, colorEdge = TRUE, foldChange = genes_for_cp) +
-  scale_colour_gradient2(name = "log2FC(HA9/noCTL)", low = "navyblue", high = "red", mid = "white")
+  scale_colour_gradient2(name = "log2FC", low = "navyblue", high = "red", mid = "white")
 ```
 
-**Emapplot**: similar terms are grouped together -- automated network layout groups related gene-sets into network clusters; mutually overlapping gene sets tend to cluster together
+This result shows one of the reasons why the gene sets "Ribosome biogenesis in eukaryotes" and "Ribosome" both show up at the top of our list: they have many genes in common. In fact, it seems as if almost all genes of "Ribosome biogenesis in eukaryotes" are also part of "Ribosome", which makes sense, but is an important detail to note.
 
-- nodes = gene sets (top 50 most sign. enriched GO terms)
-- edges = gene overlap between gene sets
-
-```{r emapplot_kegg}
-emapplot(gsea_kegg)
-```
 
 See the [documentation of clusterProfiler](https://yulab-smu.github.io/clusterProfiler-book/index.html) for more types of analyses and plots.
