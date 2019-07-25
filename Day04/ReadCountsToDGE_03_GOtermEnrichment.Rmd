@@ -1,0 +1,124 @@
+---
+title: "GO term enrichment analyses of DEG"
+author: "Friederike Duendar"
+date: "7/24/2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+output:
+  pdf_document: default
+  html_document: default
+  toc: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r settingUp, warning=FALSE, echo=FALSE, message=FALSE}
+library(knitr)
+opts_chunk$set(echo = TRUE, message = FALSE,cache=TRUE)
+library(DESeq2)
+library(magrittr)
+library(goseq)
+```
+
+We need the results of the DESeq2 analysis (`DGE.results`) and the vector of 
+differentially expressed genes (`DGE.genes`).
+
+```{r}
+load("~/Documents/Teaching/2019_RNA-seq/Rclass.RData")
+```
+
+## GO term enrichment using `goseq`
+
+*Among our list of DE genes, which GO terms are enriched?*
+
+Transcripts that are longer or more highly expressed give more statistical power
+for detecting differential expression between samples
+
+The same bias holds true for GO categories: categories with predominantly highly
+expressed or long genes are more likely to be found to be over-represented within
+the DEG.
+
+`GOseq`:
+
+1. determine DEG
+2. quantify likelihood of DE as a function of gene length (--> weight)
+3. statistical test of each GO category's significance taking the DE probability into account
+
+
+```{r goseq_yeast}
+# Constructing a named vector of 0 (= not DE) and 1 (= DEG) 
+gene.vector <- row.names(DGE.results) %in% DGEgenes %>% as.integer
+names(gene.vector) <- row.names(DGE.results)
+
+# Quantifying the length bias (= weight for each gene)
+# using a Probability Weighting Function (PWF): probability of a gene being DE ~ length
+# proportion of DE genes is plotted as a function of the transcript length
+pwf <- nullp(gene.vector, "sacCer3", "ensGene")
+
+# do the actual test for enrichment of GO terms
+GO.wall <- goseq(pwf, "sacCer3", "ensGene")
+```
+
+```{r}
+# retrieving the GO categories assigned to each gene
+go_gns <- getgo( rownames(DGE.results), 'sacCer3', 'ensGene') %>% stack
+# in principle, the gene information could be added to the goseq results:
+ merge(GO.wall, go_gns, by.x = "category", by.y = "values") %>% dim
+```
+
+To summarize the results, you can use, for example, [REVIGO](http://revigo.irb.hr/).
+
+```{r}
+# can be summarized in http://revigo.irb.hr/
+subset(GO.wall, over_represented_pvalue < 0.01, select = c("category","over_represented_pvalue")) %>%
+  write.table(., file = "~/Documents/Teaching/2019_RNA-seq/Enriched_GOterms_goseq.txt",
+              quote = FALSE, row.names = FALSE, col.names = FALSE)
+```
+
+## Gene set enrichment of KEGG pathways using `ClusterProfiler`
+
+```{r}
+library(clusterProfiler)
+
+## clusterProfiler requires a sorted vector where the values correspond
+## to the measure used for the sorting 
+DGE.results <- DGE.results[order(-1*DGE.results$log2FoldChange),]
+genes_for_cp <- DGE.results$log2FoldChange
+names(genes_for_cp) <- row.names(DGE.results)
+
+## run the gene set enrichment analysis
+gsea_kegg <- clusterProfiler::gseKEGG(geneList = genes_for_cp, organism = 'sce',
+                                      nPerm = 1000, minGSSize = 10,
+                                      pvalueCutoff = 1, verbose = FALSE)
+```
+
+**Dot plots**:
+
+```{r dotplot_kegg}
+dotplot(gsea_kegg)
+```
+
+**Cnetplots** depict the linkages of genes and biological concepts (e.g. GO terms or KEGG pathways) as a network.
+
+- nodes = genes (of the top 5 most sign. GO terms by default)
+- edges = indicate whether a gene belongs to a given gene set
+- size of the GO terms = number of genes belong to a given category
+
+```{r cnetplot_kegg, message = FALSE, warning = FALSE, fig.width = 16, fig.height = 14}
+ cnetplot(gsea_kegg, showCategory = 2, colorEdge = TRUE, foldChange = genes_for_cp) +
+  scale_colour_gradient2(name = "log2FC(HA9/noCTL)", low = "navyblue", high = "red", mid = "white")
+```
+
+**Emapplot**: similar terms are grouped together -- automated network layout groups related gene-sets into network clusters; mutually overlapping gene sets tend to cluster together
+
+- nodes = gene sets (top 50 most sign. enriched GO terms)
+- edges = gene overlap between gene sets
+
+```{r emapplot_kegg}
+emapplot(gsea_kegg)
+```
+
+See the [documentation of clusterProfiler](https://yulab-smu.github.io/clusterProfiler-book/index.html) for more types of analyses and plots.
