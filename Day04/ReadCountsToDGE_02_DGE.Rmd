@@ -1,0 +1,179 @@
+---
+title: "Performing differential gene expression analysis"
+author: "Friederike Duendar, ABC"
+output:
+  pdf_document: default
+  html_document: default
+  toc: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r settingUp, warning=FALSE, echo=FALSE, message=FALSE}
+library(knitr)
+opts_chunk$set(echo = TRUE, message = FALSE,cache=TRUE)
+library(DESeq2)
+library(magrittr)
+load("~/Documents/Teaching/2019_RNA-seq/Rclass.RData")
+```
+
+We need to ensure that the fold change will be calculated using the WT as the base line.
+`DESeq` used the levels of the condition to determine the order of the comparison.
+
+```{r DESeqPrep_relevel}
+str(DESeq.ds$condition)
+DESeq.ds$condition <- relevel(DESeq.ds$condition, ref="WT")
+str(DESeq.ds$condition)
+```
+
+#### Analysis design
+
+```{r}
+design(DESeq.ds)
+```
+
+### Running the DE analysis
+
+```{r}
+DESeq.ds <- DESeq(DESeq.ds)
+```
+
+This one line of code is equivalent to these three lines of code:
+
+```{r eval=FALSE}
+DESeq.ds <- estimateSizeFactors(DESeq.ds) # sequencing depth normalization between the samples
+DESeq.ds <- estimateDispersions(DESeq.ds) # gene-wise dispersion estimates across all samples
+DESeq.ds <- nbinomWaldTest(DESeq.ds) # this fits a negative binomial GLM and applies Wald statistics to each gene's estimated logFC
+```
+
+Extract the base means across samples, log2 fold changes, standard errors, 
+test statistics, p-values and adjusted p-values for every gene using `results()`.
+
+```{r}
+resultsNames(DESeq.ds) # tells you which types of values can be extracted with results()
+DGE.results <- results(DESeq.ds,
+                       independentFiltering = TRUE,
+                       alpha = 0.05)
+head(DGE.results) # the first line will tell you which comparison was done to achieve the log2FC
+summary(DGE.results)
+
+# the DESeqResult object can basically be handled like a data.frame
+table(DGE.results$padj < 0.05)
+```
+
+NAs in the `padj` column (but values in both `log2FC` and `pvalue`) are indicative of that gene being filtered out by the independent filtering [because it was very lowly expressed].
+
+The __MA-plot__ provides a global view of the differential genes, with the log2 fold
+change on the y-axis over the mean of normalized counts.
+
+Genes that pass the significance threshold (adjusted p.value \textless 0.05) are colored in red.
+
+```{r MAplots}
+plotMA(DGE.results, alpha = 0.05, 
+       main = "Test: p.adj.value < 0.05", ylim = c(-4,4))
+```
+
+A adj. p-value histogram:
+
+```{r adjpvalueHistogram}
+hist(DGE.results$padj, 
+     col="grey", border="white", xlab="", ylab="", main="frequencies of adj. p-values\n(all genes)")
+```
+
+A sorted results table so that we can immediately see which genes come up as the best candidates:
+
+```{r}
+DGE.results.sorted <- DGE.results[order(DGE.results$padj),]
+head(DGE.results.sorted)
+```
+
+Plotting counts for single genes (seq. depth normalized, log2-transformed)
+
+```{r singleGenePlot}
+par(mfrow=c(1,2))
+plotCounts(DESeq.ds, gene="YAL056W", normalized = TRUE)  
+plotCounts(DESeq.ds, gene=which.max(DGE.results$padj), main = "Max. p.adj.")
+```
+
+`plotCounts` simply uses `counts(dds, normalized = TRUE) + 0.5`.
+
+You can also use `pcaExplorer` for individual gene plots of `rlog` values.
+
+A heatmap of the genes that show differential expression with adjusted p-value \textless 0.05 :
+
+```{r heatmaps}
+# identify genes with the desired adjusted p-value cut-off
+DGEgenes <- rownames(subset(DGE.results.sorted, padj < 0.05))
+
+# extract rlog-transformed values of DE genes into a matrix
+rlog.dge <- DESeq.rlog[DGEgenes,] %>% assay
+
+library(pheatmap)
+# heatmap of DEG sorted by p.adjust
+pheatmap(rlog.dge, scale="none", show_rownames = FALSE, main = "DGE (no scaling)")
+pheatmap(rlog.dge, scale="row", show_rownames = FALSE, main = "DGE (row-based z-score)")
+```
+
+
+## Number 1 sanity check: is SNF2 affected in the SNF2 mutant yeast samples?
+
+To find this out, we need to retrieve the gene names and match them to the ORF 
+IDs that we've used so far.
+[http://www.bioconductor.org/packages/3.1/data/annotation/](http://www.bioconductor.org/packages/3.1/data/annotation/)
+lists annotation packages that are available within R through bioconductor.
+
+We will go with `org.Sc.sgd.db`.
+
+```{r checkForSNF2}
+#source("http://bioconductor.org/biocLite.R")
+#biocLite("org.Sc.sgd.db")
+library(org.Sc.sgd.db) # org.Hs.eg.db, org.Mm.eg.db
+
+# list keytypes that are available to query the annotation data base
+keytypes(org.Sc.sgd.db)
+
+# list columns that can be retrieved from the annotation data base
+columns(org.Sc.sgd.db)
+
+# make a batch retrieval for all DE genes
+DGEgenes <- rownames(subset(DGE.results.sorted, padj < 0.05))
+
+anno <- select(org.Sc.sgd.db,
+               keys = rownames(DESeq.ds), # rownames
+               keytype="ORF", # our rownames are ORF identifiers
+               columns=c("SGD","GENENAME","ENSEMBL")) # what to return
+
+# check whether SNF2 pops up among the top downregulated genes
+head(anno)
+
+```
+
+To get a feeling for how the difference between WT and snf2 ko looks like for a
+housekeeping gene, let's repeat the exercise.
+
+```{r singleGenePlot_noDGE, echo = TRUE}
+par(mfrow=c(1,2))
+plotCounts(dds = DESeq.ds,
+           gene = "YOR290C",
+           normalized = TRUE, transform = FALSE,
+           main = expression(atop("Expression of "*italic("snf2"), "(YOR290C)")))
+
+plotCounts(dds = DESeq.ds,
+           gene = "YGL012W", # the last gene in DGE
+           normalized = TRUE, transform = FALSE,
+           main = expression(atop("Expression of "*italic("erg4"), "(YGL012W)")))
+
+```
+
+Export the log2FC, p-values etc. into a text file:
+
+```{r, eval=FALSE}
+out.df <- merge(as.data.frame(DGE.results), anno.DGE, by.x = "row.names", by.y = "ORF")
+
+write.table(subset(out.df, padj < 0.05), file = "DESeq2results_WT-vs-SNF2.txt",
+            sep = "\t", quote = FALSE, row.names = FALSE)
+```
+
+```{r, echo=TRUE, eval = FALSE}
+save.image(file = "~/Documents/Teaching/2019_RNA-seq/Rclass.RData")
+```
