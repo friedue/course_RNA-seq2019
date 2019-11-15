@@ -1,6 +1,6 @@
 ---
-title: "Performing differential gene expression analysis"
-author: "Friederike Duendar, ABC"
+title: "Performing differential gene expression (DGE) analysis"
+author: "Friederike Dündar, ABC"
 output:
   pdf_document: default
   html_document: default
@@ -41,9 +41,13 @@ DESeq.ds <- DESeq(DESeq.ds)
 This one line of code is equivalent to these three lines of code:
 
 ```{r eval=FALSE}
-DESeq.ds <- estimateSizeFactors(DESeq.ds) # sequencing depth normalization between the samples
-DESeq.ds <- estimateDispersions(DESeq.ds) # gene-wise dispersion estimates across all samples
-DESeq.ds <- nbinomWaldTest(DESeq.ds) # this fits a negative binomial GLM and applies Wald statistics to each gene's estimated logFC
+# sequencing depth normalization between the samples
+DESeq.ds <- estimateSizeFactors(DESeq.ds) 
+# gene-wise dispersion estimates across all samples
+DESeq.ds <- estimateDispersions(DESeq.ds) 
+# this fits a negative binomial GLM and applies Wald statistics to each gene's
+# estimated logFC values comparing the conditions/groups of interest
+DESeq.ds <- nbinomWaldTest(DESeq.ds) 
 ```
 
 Extract the base means across samples, log2 fold changes, standard errors, 
@@ -54,7 +58,7 @@ resultsNames(DESeq.ds) # tells you which types of values can be extracted with r
 DGE.results <- results(DESeq.ds,
                        independentFiltering = TRUE,
                        alpha = 0.05)
-head(DGE.results) # the first line will tell you which comparison was done to achieve the log2FC
+head(DGE.results) # first line indicates which comparison was done for the log2FC
 summary(DGE.results)
 
 # the DESeqResult object can basically be handled like a data.frame
@@ -77,7 +81,8 @@ A adj. p-value histogram:
 
 ```{r adjpvalueHistogram}
 hist(DGE.results$padj, 
-     col="grey", border="white", xlab="", ylab="", main="frequencies of adj. p-values\n(all genes)")
+  col="grey", border="white", xlab="", ylab="",
+  main="frequencies of adj. p-values\n(all genes)")
 ```
 
 A sorted results table so that we can immediately see which genes come up as the best candidates:
@@ -110,8 +115,10 @@ rlog.dge <- DESeq.rlog[DGEgenes,] %>% assay
 
 library(pheatmap)
 # heatmap of DEG sorted by p.adjust
-pheatmap(rlog.dge, scale="none", show_rownames = FALSE, main = "DGE (no scaling)")
-pheatmap(rlog.dge, scale="row", show_rownames = FALSE, main = "DGE (row-based z-score)")
+pheatmap(rlog.dge, scale="none", show_rownames = FALSE,
+  main = "DGE (no scaling)")
+pheatmap(rlog.dge, scale="row", show_rownames = FALSE,
+  main = "DGE (row-based z-score)")
 ```
 
 
