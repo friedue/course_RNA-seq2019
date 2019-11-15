@@ -1,7 +1,6 @@
 ---
 title: "GO term enrichment analyses of DEG"
-author: "Friederike Duendar"
-date: "7/24/2019"
+author: "Friederike Dündar"
 output:
   pdf_document: default
   html_document: default
@@ -15,7 +14,7 @@ library(knitr)
 opts_chunk$set(echo = TRUE, message = FALSE,cache=TRUE, warning =FALSE)
 library(DESeq2)
 library(magrittr)
-library(goseq)
+library(goseq) # package for GO term enrichment
 library(ggplot2)
 ```
 
@@ -27,7 +26,7 @@ load("~/Documents/Teaching/2019_RNA-seq/Rclass.RData")
 DESeq.ds <- DESeq(DESeq.ds)
 DGE.results <- results(DESeq.ds,independentFiltering = TRUE, alpha = 0.05)
 DGEgenes <- rownames(subset(DGE.results, padj < 0.05))
-
+head(DGEgenes)
 ```
 
 ## GO term enrichment using `goseq`
@@ -66,7 +65,7 @@ GO.wall <- goseq(pwf, "sacCer3", "ensGene")
 # retrieving the GO categories assigned to each gene
 go_gns <- getgo( rownames(DGE.results), 'sacCer3', 'ensGene') %>% stack
 # in principle, the gene information could be added to the goseq results:
- merge(GO.wall, go_gns, by.x = "category", by.y = "values") %>% dim
+merge(GO.wall, go_gns, by.x = "category", by.y = "values") %>% dim
 ```
 
 To summarize the results, you can use, for example, [REVIGO](http://revigo.irb.hr/).
@@ -76,8 +75,9 @@ To summarize the results, you can use, for example, [REVIGO](http://revigo.irb.h
 # which is the input type that REVIGO needs
 subset(GO.wall, over_represented_pvalue < 0.01, 
        select = c("category","over_represented_pvalue")) %>%
-  write.table(., file = "~/Documents/Teaching/2019_RNA-seq/Enriched_GOterms_goseq.txt",
-              quote = FALSE, row.names = FALSE, col.names = FALSE)
+  write.table(.,
+    file = "~/Documents/Teaching/2019_RNA-seq/Enriched_GOterms_goseq.txt",
+    quote = FALSE, row.names = FALSE, col.names = FALSE)
 ```
 
 REVIGO generates multiple plots; the easiest way to obtain them in high quality is to download the R scripts that it offers and to run those yourself.
@@ -88,9 +88,9 @@ REVIGO generates multiple plots; the easiest way to obtain them in high quality 
 source("~/Downloads/REVIGO_treemap.r")  
 ```
 
-Since I personally don't like plots being immediately printed to PDF (much more difficult to include them in an Rmarkdown!), I've tweaked the function a bit; it's essentially the original REVIGO script that I downloaded minus the part where the revigo.data object is generated and with a couple more options to tune the resulting heatmap.
+Since I personally don't like plots being immediately printed to PDF (much more difficult to include them in an Rmarkdown!), I've tweaked the function a bit; it's essentially the original REVIGO script that I downloaded minus the part where the `revigo.data` object is generated and with a couple more options to tune the resulting heatmap.
 
-```{r}
+```{r define_own_treemap_function}
 REVIGO_treemap <- function(revigo.data, col_palette = "Paired",
                            title = "REVIGO Gene Ontology treemap", ...){
 
@@ -103,7 +103,8 @@ REVIGO_treemap <- function(revigo.data, col_palette = "Paired",
   stuff$uniqueness <- as.numeric( as.character(stuff$uniqueness) )
   stuff$dispensability <- as.numeric( as.character(stuff$dispensability) )
 
-  # check the treemap command documentation for all possible parameters - there are a lot more
+  # check the treemap command documentation for all possible parameters - 
+  # there are a lot more
   treemap::treemap(
     stuff,
     index = c("representative","description"),
@@ -124,14 +125,22 @@ REVIGO_treemap <- function(revigo.data, col_palette = "Paired",
 ```
 
 I still need the originally downloaded script to generate the `revigo.data` object, which I will then pass onto my newly tweaked function.
-Using the command line tools `sed` and `egrep`,  I'm going to only keep the lines between the one starting with "revigo.data" and the line starting with "stuff".
+Using the command line (!) tools `sed` and `egrep`,  I'm going to only keep the lines between the one starting with "revigo.data" and the line starting with "stuff".
 The output of that will be parsed into a new file, which will only generate the `revigo.data` object that I'm after (no PDF!).
 
 ```{r}
-system("sed -n '/^revigo\\.data.*/,/^stuff.*/p' ~/Downloads/REVIGO_treemap.r | egrep '^rev|^c' > ~/Downloads/REVIGO_myData.r")
+# the system function allows me to run command line stuff outside of R
+# just for legibility purposes, I'll break up the command into individual 
+# components, which I'll join back together using paste()
+sed_cmd <- "sed -n '/^revigo\\.data.*/,/^stuff.*/p'"
+fname <- "~/Downloads/REVIGO_treemap.r"
+egrep_cmd <- "egrep '^rev|^c'"
+out_fname <- "~/Downloads/REVIGO_myData.r"
 
-## upon sourcing; no treemap PDF will be generated, but the revigo.data object should appear in
-## your environment
+system(paste(sed_cmd, fname, "|", egrep_cmd, ">", out_fname))
+
+## upon sourcing; no treemap PDF will be generated, but the revigo.data object
+## should appear in your R environment
 source("~/Downloads/REVIGO_myData.r")
 REVIGO_treemap(revigo.data)
 ```
@@ -177,11 +186,12 @@ dotplot(gsea_kegg)
 - size of the GO terms = number of genes belong to a given category
 
 ```{r cnetplot_kegg, message = FALSE, warning = FALSE, fig.width = 16, fig.height = 14}
- cnetplot(gsea_kegg, showCategory = 2, colorEdge = TRUE, foldChange = genes_for_cp) +
-  scale_colour_gradient2(name = "log2FC", low = "navyblue", high = "red", mid = "white")
+ cnetplot(gsea_kegg,
+   showCategory = 2, colorEdge = TRUE, foldChange = genes_for_cp) +
+  scale_colour_gradient2(name = "log2FC",
+    low = "navyblue", high = "red", mid = "white")
 ```
 
 This result shows one of the reasons why the gene sets "Ribosome biogenesis in eukaryotes" and "Ribosome" both show up at the top of our list: they have many genes in common. In fact, it seems as if almost all genes of "Ribosome biogenesis in eukaryotes" are also part of "Ribosome", which makes sense, but is an important detail to note.
-
 
 See the [documentation of clusterProfiler](https://yulab-smu.github.io/clusterProfiler-book/index.html) for more types of analyses and plots.
